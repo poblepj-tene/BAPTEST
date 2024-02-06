@@ -1,0 +1,113 @@
+<%+header%>
+<style>g {color:grey; font-size:75%; vertical-align: super;}</style>
+<!-- <script type="text/javascript" src="<%=resource%>/xhr.js?v=git-23.159.15540-7154b89"></script> -->
+<script type="text/javascript" src="<%=resource%>/xhr.js?v=1.1.1"></script>
+<script type="text/javascript">//<![CDATA[
+	XHR.poll(30 , '<%=luci.dispatcher.build_url("admin", "modem", "get_csq")%>', null,
+		function(x, rv)
+		{
+			document.getElementById('date').innerHTML=rv.date;
+			document.getElementById('csq').innerHTML=rv.csq;
+			document.getElementById('per').innerHTML=rv.per;
+			document.getElementById('rssi').innerHTML=rv.rssi;
+			document.getElementById('modem').innerHTML=rv.modem;
+			document.getElementById('cops').innerHTML=rv.cops;
+			document.getElementById('mode').innerHTML=rv.mode;
+			// document.getElementById('lac').innerHTML=rv.lac;
+			document.getElementById('cid').innerHTML=rv.cid;
+			// document.getElementById('lacn').innerHTML=rv.lacn;
+			document.getElementById('cidn').innerHTML=rv.cidn;
+			document.getElementById('mcc').innerHTML=rv.mcc;
+			document.getElementById('simsel').innerHTML=rv.simsel;
+			document.getElementById('rnc').innerHTML=rv.rnc;
+			document.getElementById('rncn').innerHTML=rv.rncn;
+			// document.getElementById('down').innerHTML=rv.down;
+			// document.getElementById('up').innerHTML=rv.up;
+			document.getElementById('ecio').innerHTML=rv.ecio;
+			document.getElementById('rscp').innerHTML=rv.rscp;
+			document.getElementById('ecio1').innerHTML=rv.ecio1;
+			document.getElementById('rscp1').innerHTML=rv.rscp1;
+			document.getElementById('conntype').innerHTML=rv.conntype;
+			document.getElementById('chan').innerHTML=rv.channel;
+			document.getElementById('lband').innerHTML=rv.lband;
+			// document.getElementById('conmon').innerHTML=rv.netmode;
+			document.getElementById('pci').innerHTML=rv.pci;
+			document.getElementById('sinr').innerHTML=rv.sinr;
+			document.getElementById('imei').innerHTML=rv.imei;
+			document.getElementById('imsi').innerHTML=rv.imsi;
+			document.getElementById('iccid').innerHTML=rv.iccid;
+			document.getElementById('phone').innerHTML=rv.phone;
+		}
+	);
+//]]></script>
+
+
+<div class="cbi-map" id="cbi-modem">
+<h2><a id="content" name="content"><%:Signal Status%></a></h2>
+<div class="cbi-map-descr"><%:Refresh may delay in the interface. Some data may be blank due to carrier restrictions%></div>
+
+<!-- <fieldset class="cbi-section" id="simwarn" style="display:none;">
+	<legend><%:SIM Info%></legend>
+	<table width="550"  border="0">
+		<tr>
+			<td width="10%"></td>
+    		<td width="60%"><div align="left" id="simsg" style="font-size:1.875em"><strong></strong></div></td>
+			<td width="30%"></td>
+		</tr>
+	</table>
+</fieldset> -->
+
+
+<fieldset class="cbi-section" id="cbi-mod">
+	<legend><%:Module Info%></legend>
+	<table width="100%" cellspacing="10">
+		<tr><td width="20%"><%:Module :%></td><td id="modem">-</td><td></td></tr>
+		<tr><td width="20%"><%:Manufacturer :%></td><td id="conntype"></td><td></td></tr>
+		<tr><td width="20%"><%:Update Time :%></td><td id="date"></td><td></td></tr>
+	</table>
+</fieldset>
+
+<fieldset class="cbi-section" id="cbi-msinfo">
+	<legend><%:Module/SIM Info%></legend>
+	<table width="100%" cellspacing="10">
+		<tr><td width="20%"><%:SIM Slot :%></td><td id="simsel"></td><td></td></tr>
+		<tr><td width="20%"><%:Carrier :%></td><td id="cops"></td><td></td></tr>
+		<tr><td width="20%"><%:IMEI :%></td><td id="imei"></td><td></td></tr>
+		<tr><td width="20%"><%:IMSI :%></td><td id="imsi"></td><td></td></tr>
+		<tr><td width="20%"><%:ICCID :%></td><td id="iccid"></td><td></td></tr>
+		<tr><td width="20%"><%:SIM Number :%></td><td id="phone"></td><td></td></tr>
+	</table>
+</fieldset>
+
+
+<fieldset class="cbi-section" id="cbi-sig">
+	<legend><%:Signal Info%></legend>
+	<table width="100%" cellspacing="10">
+		<tr><td width="20%"><%:Cellular Network Type :%></td><td id="mode"></td><td></td></tr>
+		<tr><td width="20%"><%:Signal Quality (CSQ) :%></td><td id="csq"></td><td></td></tr>
+		<tr><td width="20%"><%:Signal Strength :%></td><td id="per"></td><td></td></tr>
+		<tr><td width="20%"><%:RSSI : %></td><td id="rssi"></td><td></td></tr>
+		<tr><td width="20%"><%:RSRQ : %></td><td><ul><span id="ecio" class="r"></span><span id="ecio1" class="r"></span></ul></td><td></td></tr>
+		<tr><td width="20%"><%:RSRP : %></td><td><ul><span id="rscp" class="r"></span><span id="rscp1" class="r"></span></ul></td><td></td></tr>
+		<tr><td width="20%"><%:SINR : %></td><td id="sinr"></td><td></td></tr>
+		<!-- <tr><td width="20%"><%:Cellular Monitor : %></td><td id="conmon"></td><td></td></tr> -->
+	</table>
+</fieldset>
+
+<fieldset class="cbi-section" id="cbi-sig">
+	<legend><%:Station Information%></legend>
+	<table width="100%" cellspacing="10">
+		<!-- <tr><td width="20%"><%:MCC / MNC  :%></td><td id="mcc"></td><td id="mnc"></td></tr> -->
+		<tr><td width="20%"><%:MCC/MNC :%></td><td id="mcc"></td><td></td></tr>
+		<tr><td width="20%"><%:eNB ID : %></td><td><ul><span id="rnc" class="r"></span><span id="rncn" class="r"></span></ul></td><td></td></tr>
+		<!-- <tr><td width="20%"><%:TAC : %></td><td><ul><span id="lac" class="r"></span><span id="lacn" class="r"></span></ul></td><td></td></tr> -->
+		<tr><td width="20%"><%:Cell ID : %></td><td><ul><span id="cid" class="r"></span><span id="cidn" class="r"></span></ul></td><td></td></tr>
+		<tr><td width="20%"><%:Band : %></td><td id="lband"></td><td></td></tr>
+		<tr><td width="20%"><%:Channel : %></td><td id="chan"></td><td></td></tr>
+		<tr><td width="20%"><%:PCI : %></td><td id="pci"></td><td></td></tr>
+		<!-- <tr><td width="20%"><%:AMBR: %></td><td><ul><span id="down" class="r"></span><span id="up" class="r"></span></ul></td><td></td></tr> -->
+	</table>
+</fieldset>
+</div>
+<%+footer%>
+

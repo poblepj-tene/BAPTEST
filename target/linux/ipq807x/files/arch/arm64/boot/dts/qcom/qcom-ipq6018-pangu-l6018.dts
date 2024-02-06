@@ -1,0 +1,796 @@
+/*
+ * Copyright (c) 2019, The Linux Foundation. All rights reserved.
+ *
+ * Permission to use, copy, modify, and/or distribute this software for any
+ * purpose with or without fee is hereby granted, provided that the above
+ * copyright notice and this permission notice appear in all copies.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+ * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+ * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+ * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ */
+/dts-v1/;
+
+#include "qcom-ipq6018.dtsi"
+#include "qcom-ipq6018-rpm-regulator.dtsi"
+#include "qcom-ipq6018-cpr-regulator.dtsi"
+#include "qcom-ipq6018-cp-cpu.dtsi"
+#include <dt-bindings/input/input.h>
+#include <dt-bindings/gpio/gpio.h>
+
+/ {
+	#address-cells = <0x2>;
+	#size-cells = <0x2>;
+	model = "Pangu L6018";
+	compatible = "pangu,l6018", "qcom,ap-cp01-c3", "qcom,ipq6018-cp01", "qcom,ipq6018";
+	interrupt-parent = <&intc>;
+	qcom,msm-id = <0x192 0x0>, <0x193 0x0>;
+
+	aliases {
+		led-boot = &led_power;
+		led-failsafe = &led_power;
+		led-running = &led_power;
+		led-upgrade = &led_power;
+
+		serial0 = &blsp1_uart3;
+		serial1 = &blsp1_uart2;
+		sdhc2 = &sdhc_2;
+		/*
+		 * Aliases as required by u-boot
+		 * to patch MAC addresses
+		 */
+		ethernet0 = "/soc/dp1";
+		ethernet1 = "/soc/dp2";
+		ethernet2 = "/soc/dp3";
+		ethernet3 = "/soc/dp4";
+		ethernet4 = "/soc/dp5";
+	};
+
+	chosen {
+		bootargs-append = " root=/dev/ubiblock0_1 swiotlb=1 coherent_pool=2M";
+	};
+
+	/*
+	 * +=========+==============+========================+
+	 * |        |              |                         |
+	 * | Region | Start Offset |          Size           |
+	 * |        |              |                         |
+	 * +--------+--------------+-------------------------+
+	 * |        |              |                         |
+	 * |        |              |                         |
+	 * |        |              |                         |
+	 * |        |              |                         |
+	 * | Linux  |  0x41000000  |         139MB           |
+	 * |        |              |                         |
+	 * |        |              |                         |
+	 * |        |              |                         |
+	 * +--------+--------------+-------------------------+
+	 * | TZ App |  0x49B00000  |           6MB           |
+	 * +--------+--------------+-------------------------+
+	 *
+	 * From the available 145 MB for Linux in the first 256 MB,
+	 * we are reserving 6 MB for TZAPP.
+	 *
+	 * Refer arch/arm64/boot/dts/qcom/qcom-ipq6018-memory.dtsi
+	 * for memory layout.
+	 */
+
+	reserved-memory {
+/* TZAPP is enabled in default memory profile only */
+#if !defined(__IPQ_MEM_PROFILE_256_MB__) && !defined(__IPQ_MEM_PROFILE_512_MB__)
+		tzapp:tzapp@49B00000 {	/* TZAPPS */
+			no-map;
+			reg = <0x0 0x49B00000 0x0 0x00600000>;
+		};
+#endif
+
+/* No Pine attach in 256M profile */
+#if !defined(__IPQ_MEM_PROFILE_256_MB__)
+#ifdef __IPQ_MEM_PROFILE_512_MB__
+		/*	    512 MB Profile for cp01-c3
+		 * +========+==============+=========================+
+		 * | Region | Start Offset |          Size           |
+		 * +--------+--------------+-------------------------+
+		 * |  NSS   |  0x40000000  |          16MB           |
+		 * +--------+--------------+-------------------------+
+		 * |        |              |                         |
+		 * | Linux  |  0x41000000  |         145MB           |
+		 * |        |              |                         |
+		 * +--------+--------------+-------------------------+
+		 * | uboot  |  0x4A100000  |           4MB           |
+		 * +--------+--------------+-------------------------+
+		 * |  SBL   |  0x4A500000  |           1MB           |
+		 * +--------+--------------+-------------------------+
+		 * | TZ+HYP |  0x4A600000  |           4MB           |
+		 * +--------+--------------+-------------------------+
+		 * |  smem  |  0x4AA00000  |           1MB           |
+		 * +--------+--------------+-------------------------+
+		 * |   Q6   |  0x4AB00000  |          55MB           |
+		 * +--------+--------------+-------------------------+
+		 * |  QDSS  |  0x4E200000  |           1MB           |
+		 * +--------+--------------+-------------------------+
+		 * | M3 Dump|  0x4E300000  |           1MB           |
+		 * +--------+--------------+-------------------------+
+		 * |  Pine  |  0x4E400000  |          30MB           |
+		 * +--------+--------------+-------------------------+
+		 * |  MHI0  |  0x50200000  |          16MB           |
+		 * +=================================================+
+		 * |           Remaining memory for Linux            |
+		 * +=================================================+
+		 */
+		qcn9000_pcie0@4e400000 {
+			no-map;
+			reg = <0x0 0x4E400000 0x0 0x1E00000>;
+		};
+
+		mhi_region0: dma_pool0@50200000 {
+			compatible = "shared-dma-pool";
+			no-map;
+			reg = <0x0 0x50200000 0x0 0x01000000>;
+		};
+#else
+		/*		  Default Profile
+		 * +========+==============+=========================+
+		 * | Region | Start Offset |          Size           |
+		 * +--------+--------------+-------------------------+
+		 * |  NSS   |  0x40000000  |          16MB           |
+		 * +--------+--------------+-------------------------+
+		 * | Linux  |  0x41000000  |         145MB           |
+		 * +--------+--------------+-------------------------+
+		 * | uboot  |  0x4A100000  |           4MB           |
+		 * +--------+--------------+-------------------------+
+		 * |  SBL   |  0x4A500000  |           1MB           |
+		 * +--------+--------------+-------------------------+
+		 * | TZ+HYP |  0x4A600000  |           4MB           |
+		 * +--------+--------------+-------------------------+
+		 * |  smem  |  0x4AA00000  |           1MB           |
+		 * +--------+--------------+-------------------------+
+		 * |   Q6   |  0x4AB00000  |          85MB           |
+		 * +--------+--------------+-------------------------+
+		 * |  QDSS  |  0x50000000  |           1MB           |
+		 * +--------+--------------+-------------------------+
+		 * | M3 Dump|  0x50100000  |           1MB           |
+		 * +--------+--------------+-------------------------+
+		 * |  Pine  |  0x50200000  |          45MB           |
+		 * +--------+--------------+-------------------------+
+		 * |  MHI0  |  0x52F00000  |          24MB           |
+		 * +=================================================+
+		 * |           Remaining memory for Linux            |
+		 * +=================================================+
+		 */
+		qcn9000_pcie0@50200000 {
+			no-map;
+			reg = <0x0 0x50200000 0x0 0x02D00000>;
+		};
+
+		mhi_region0: dma_pool0@52f00000 {
+			compatible = "shared-dma-pool";
+			no-map;
+			reg = <0x0 0x52F00000 0x0 0x01800000>;
+		};
+#endif
+#endif
+	};
+};
+
+&tlmm {
+	pinctrl-0 = <&sd_ldo_pins>;
+	pinctrl-names = "default";
+
+	uart_pins: uart_pins {
+		mux {
+			pins = "gpio44", "gpio45";
+			function = "blsp2_uart";
+			drive-strength = <8>;
+			bias-pull-down;
+		};
+	};
+
+	sd_ldo_pins: sd_ldo_pins {
+		mux {
+			pins = "gpio66";
+			function = "gpio";
+			drive-strength = <2>;
+			bias-disable;
+			output-low;
+		};
+	};
+
+	spi_0_pins: spi_0_pins {
+		mux {
+			pins = "gpio38", "gpio39", "gpio40", "gpio41";
+			function = "blsp0_spi";
+			drive-strength = <8>;
+			bias-pull-down;
+		};
+	};
+
+	// spi_1_pins: spi_1_pins {
+	// 	mux {
+	// 		pins = "gpio69", "gpio71", "gpio72";
+	// 		function = "blsp1_spi";
+	// 		drive-strength = <8>;
+	// 		bias-pull-down;
+	// 	};
+	// 	spi_cs {
+	// 		pins = "gpio70";
+	// 		function = "blsp1_spi";
+	// 		drive-strength = <8>;
+	// 		bias-disable;
+	// 	};
+	// 	quartz_interrupt {
+	// 		pins = "gpio78";
+	// 		function = "gpio";
+	// 		input;
+	// 		bias-disable;
+	// 	};
+	// 	quartz_reset {
+	// 		pins = "gpio79";
+	// 		function = "gpio";
+	// 		output-low;
+	// 		bias-disable;
+	// 	};
+
+	// };
+
+	qpic_pins: qpic_pins {
+		data_0 {
+			pins = "gpio15";
+			function = "qpic_pad0";
+			drive-strength = <8>;
+			bias-pull-down;
+		};
+		data_1 {
+			pins = "gpio12";
+			function = "qpic_pad1";
+			drive-strength = <8>;
+			bias-pull-down;
+		};
+		data_2 {
+			pins = "gpio13";
+			function = "qpic_pad2";
+			drive-strength = <8>;
+			bias-pull-down;
+		};
+		data_3 {
+			pins = "gpio14";
+			function = "qpic_pad3";
+			drive-strength = <8>;
+			bias-pull-down;
+		};
+		data_4 {
+			pins = "gpio5";
+			function = "qpic_pad4";
+			drive-strength = <8>;
+			bias-pull-down;
+		};
+		data_5 {
+			pins = "gpio6";
+			function = "qpic_pad5";
+			drive-strength = <8>;
+			bias-pull-down;
+		};
+		data_6 {
+			pins = "gpio7";
+			function = "qpic_pad6";
+			drive-strength = <8>;
+			bias-pull-down;
+		};
+		data_7 {
+			pins = "gpio8";
+			function = "qpic_pad7";
+			drive-strength = <8>;
+			bias-pull-down;
+		};
+		qpic_pad {
+			pins = "gpio1", "gpio3", "gpio4",
+			       "gpio10", "gpio11", "gpio17";
+			function = "qpic_pad";
+			drive-strength = <8>;
+			bias-pull-down;
+		};
+	};
+
+	sd_pins: sd_pins {
+		mux {
+			pins = "gpio62";
+			function = "sd_card";
+			drive-strength = <8>;
+			bias-pull-up;
+		};
+	};
+
+	module_en: module_en {
+		pins = "gpio31";
+		function = "gpio";
+		drive-strength = <8>;
+		output-high;
+		bias-pull-up;
+	};
+
+	// 低电平生效，高电平关机
+	module_power: module_power {
+		pins = "gpio29";
+		function = "gpio";
+		drive-strength = <8>;
+		output-low;
+		bias-pull-down;
+	};
+
+	// extcon_usb_pins: extcon_usb_pins {
+	// 	mux {
+	// 		pins = "gpio26";
+	// 		function = "gpio";
+	// 		drive-strength = <2>;
+	// 		bias-pull-down;
+	// 	};
+	// };
+
+	button_pins: button_pins {
+		wps_button {
+			pins = "gpio9";
+			function = "gpio";
+			drive-strength = <8>;
+			bias-pull-up;
+		};
+	};
+
+	mdio_pins: mdio_pinmux {
+		mux_0 {
+			pins = "gpio64";
+			function = "mdc";
+			drive-strength = <8>;
+			bias-pull-up;
+		};
+		mux_1 {
+			pins = "gpio65";
+			function = "mdio";
+			drive-strength = <8>;
+			bias-pull-up;
+		};
+		mux_2 {
+			pins = "gpio75";
+			function = "gpio";
+			bias-pull-up;
+		};
+		mux_3 {
+			pins = "gpio77";
+			function = "gpio";
+			bias-pull-up;
+		};
+	};
+
+	leds_pins: leds_pins {
+		power {
+			pins = "gpio25";
+			function = "gpio";
+			drive-strength = <8>;
+			bias-pull-down;
+		};
+
+		wlan5g {
+			pins = "gpio35";
+			function = "gpio";
+			drive-strength = <8>;
+			bias-pull-down;
+		};
+
+		wlan2g {
+			pins = "gpio37";
+			function = "gpio";
+			drive-strength = <8>;
+			bias-pull-down;
+		};
+
+		wan {
+			pins = "gpio24";
+			function = "gpio";
+			drive-strength = <8>;
+			bias-pull-down;
+		};
+
+		usb0 {
+			pins = "gpio50";
+			function = "gpio";
+			drive-strength = <8>;
+			bias-pull-down;
+		};
+	};
+
+	hsuart_pins: hsuart_pins {
+		mux {
+			pins = "gpio71", "gpio72", "gpio69", "gpio70";
+			function = "blsp1_uart";
+			drive-strength = <8>;
+			bias-disable;
+		};
+	};
+
+	btcoex_pins: btcoex_pins {
+		mux_0 {
+			pins = "gpio51";
+			function = "pta1_1";
+			drive-strength = <6>;
+			bias-pull-down;
+		};
+		mux_1 {
+			pins = "gpio53";
+			function = "pta1_0";
+			drive-strength = <6>;
+			bias-pull-down;
+		};
+		mux_2 {
+			pins = "gpio52";
+			function = "pta1_2";
+			drive-strength = <6>;
+			bias-pull-down;
+		};
+	};
+};
+
+&soc {
+	// extcon_usb: extcon_usb {
+	// 	pinctrl-0 = <&extcon_usb_pins>;
+	// 	pinctrl-names = "default";
+	// 	id-gpio = <&tlmm 26 GPIO_ACTIVE_LOW>;
+	// 	status = "ok";
+	// };
+
+	mdio: mdio@90000 {
+		pinctrl-0 = <&mdio_pins>;
+		pinctrl-names = "default";
+		phy-reset-gpio = <&tlmm 75 0 &tlmm 77 1>;
+		status = "ok";
+		phy0: ethernet-phy@0 {
+			reg = <0>;
+		};
+		phy1: ethernet-phy@1 {
+			reg = <1>;
+		};
+		phy2: ethernet-phy@2 {
+			reg = <2>;
+		};
+		phy3: ethernet-phy@3 {
+			reg = <3>;
+		};
+		phy4: ethernet-phy@4 {
+			reg = <4>;
+		};
+	};
+
+	dp1 {
+		device_type = "network";
+		compatible = "qcom,nss-dp";
+		qcom,id = <1>;
+		reg = <0x3a001000 0x200>;
+		qcom,mactype = <0>;
+		local-mac-address = [000000000000];
+		qcom,link-poll = <1>;
+		qcom,phy-mdio-addr = <0>;
+		phy-mode = "sgmii";
+	};
+
+	dp2 {
+		device_type = "network";
+		compatible = "qcom,nss-dp";
+		qcom,id = <2>;
+		reg = <0x3a001200 0x200>;
+		qcom,mactype = <0>;
+		local-mac-address = [000000000000];
+		qcom,link-poll = <1>;
+		qcom,phy-mdio-addr = <1>;
+		phy-mode = "sgmii";
+	};
+
+	dp3 {
+		device_type = "network";
+		compatible = "qcom,nss-dp";
+		qcom,id = <3>;
+		reg = <0x3a001400 0x200>;
+		qcom,mactype = <0>;
+		local-mac-address = [000000000000];
+		qcom,link-poll = <1>;
+		qcom,phy-mdio-addr = <2>;
+		phy-mode = "sgmii";
+	};
+
+	dp4 {
+		device_type = "network";
+		compatible = "qcom,nss-dp";
+		qcom,id = <4>;
+		reg = <0x3a001600 0x200>;
+		qcom,mactype = <0>;
+		local-mac-address = [000000000000];
+		qcom,link-poll = <1>;
+		qcom,phy-mdio-addr = <3>;
+		phy-mode = "sgmii";
+	};
+
+	dp5 {
+		device_type = "network";
+		compatible = "qcom,nss-dp";
+		qcom,id = <5>;
+		reg = <0x3a001800 0x200>;
+		qcom,mactype = <0>;
+		local-mac-address = [000000000000];
+		qcom,link-poll = <1>;
+		qcom,phy-mdio-addr = <4>;
+		phy-mode = "sgmii";
+	};
+
+	ess-switch@3a000000 {
+		switch_cpu_bmp = <0x1>;  /* cpu port bitmap */
+		switch_lan_bmp = <0x1e>; /* lan port bitmap */
+		switch_wan_bmp = <0x20>; /* wan port bitmap */
+		switch_inner_bmp = <0xc0>; /*inner port bitmap*/
+		switch_mac_mode = <0x0>; /* mac mode for uniphy instance0*/
+		switch_mac_mode1 = <0xff>; /* mac mode for uniphy instance1*/
+		switch_mac_mode2 = <0xff>; /* mac mode for uniphy instance2*/
+		qcom,port_phyinfo {
+			port@0 {
+				port_id = <1>;
+				phy_address = <0>;
+			};
+			port@1 {
+				port_id = <2>;
+				phy_address = <1>;
+			};
+			port@2 {
+				port_id = <3>;
+				phy_address = <2>;
+			};
+			port@3 {
+				port_id = <4>;
+				phy_address = <3>;
+			};
+			port@4 {
+				port_id = <5>;
+				phy_address = <4>;
+			};
+		};
+	};
+
+	gpio_keys {
+		compatible = "gpio-keys";
+		pinctrl-0 = <&button_pins>;
+		pinctrl-names = "default";
+
+		wps {
+			label = "wps";
+			linux,code = <KEY_RESTART>;
+			gpios = <&tlmm 9 GPIO_ACTIVE_LOW>;
+			linux,input-type = <1>;
+			debounce-interval = <60>;
+		};
+	};
+
+	leds {
+		compatible = "gpio-leds";
+		pinctrl-0 = <&leds_pins>;
+		pinctrl-names = "default";
+
+		led@24 {
+			label = "green:net";
+			gpios = <&tlmm 24 GPIO_ACTIVE_HIGH>;
+		};
+
+		led@50 {
+			label = "green:usb0";
+			gpios = <&tlmm 50 GPIO_ACTIVE_HIGH>;
+		};
+
+		led_power: led@25 {
+			label = "green:power";
+			gpios = <&tlmm 25 GPIO_ACTIVE_HIGH>;
+		};
+
+		led@35 {
+			label = "green:wlan5g";
+			gpios = <&tlmm 35 GPIO_ACTIVE_HIGH>;
+		};
+
+		led@37 {
+			label = "green:wlan2g";
+			gpios = <&tlmm 37 GPIO_ACTIVE_HIGH>;
+		};
+
+		// led@29 {
+		// 	label = "green:led1";
+		// 	gpios = <&tlmm 29 GPIO_ACTIVE_HIGH>;
+		// };
+
+		// led@33 {
+		// 	label = "green:led2";
+		// 	gpios = <&tlmm 33 GPIO_ACTIVE_HIGH>;
+		// };
+
+		// led@23 {
+		// 	label = "green:led3";
+		// 	gpios = <&tlmm 23 GPIO_ACTIVE_HIGH>;
+		// };
+
+		// led@53 {
+		// 	label = "green:led4";
+		// 	gpios = <&tlmm 53 GPIO_ACTIVE_HIGH>;
+		// };
+	};
+
+	sd_pwrseq: sd-pwrseq {
+		compatible = "mmc-pwrseq-ipq";
+		reset-gpios = <&tlmm 66 GPIO_ACTIVE_HIGH>;
+	};
+};
+
+&blsp1_uart3 {
+	pinctrl-0 = <&uart_pins>;
+	pinctrl-names = "default";
+	status = "ok";
+};
+
+&spi_0 {
+	pinctrl-0 = <&spi_0_pins>;
+	pinctrl-names = "default";
+	cs-select = <0>;
+	status = "ok";
+
+	m25p80@0 {
+		#address-cells = <1>;
+		#size-cells = <1>;
+		reg = <0>;
+		compatible = "n25q128a11";
+		linux,modalias = "m25p80", "n25q128a11";
+		spi-max-frequency = <50000000>;
+		use-default-sizes;
+	};
+};
+
+&blsp1_uart2 {
+	pinctrl-0 = <&hsuart_pins &btcoex_pins>;
+	pinctrl-names = "default";
+	dmas = <&blsp_dma 2>,
+		<&blsp_dma 3>;
+	dma-names = "tx", "rx";
+	status = "ok";
+};
+
+// &spi_1 { /* BLSP1 QUP1 */
+// 	pinctrl-0 = <&spi_1_pins>;
+// 	pinctrl-names = "default";
+// 	cs-select = <0>;
+// 	quartz-reset-gpio = <&tlmm 79 1>;
+// 	status = "disabled";
+// 	spidev1: spi@1 {
+// 		compatible = "qca,spidev";
+// 		reg = <0>;
+// 		spi-max-frequency = <24000000>;
+// 	};
+// };
+
+&tlmm {
+	i2c_1_pins: i2c_1_pins {
+		mux {
+			pins = "gpio42", "gpio43";
+			function = "blsp2_i2c";
+			drive-strength = <8>;
+			bias-pull-down;
+		};
+	};
+};
+
+&i2c_1 {
+	pinctrl-0 = <&i2c_1_pins>;
+	pinctrl-names = "default";
+	status = "ok";
+};
+
+&pcie0 {
+	interrupts = <0 52 0>, <0 416 0>, <0 417 0>,
+		     <0 418 0>, <0 419 0>, <0 420 0>,
+		     <0 421 0>, <0 422 0>, <0 423 0>,
+		     <0 424 0>, <0 425 0>, <0 426 0>,
+		     <0 427 0>, <0 428 0>, <0 429 0>,
+		     <0 430 0>, <0 431 0>;
+
+	interrupt-names = "msi", "msi_0", "msi_1",
+			  "msi_2", "msi_3", "msi_4",
+			  "msi_5", "msi_6", "msi_7",
+			  "msi_8", "msi_9", "msi_10",
+			  "msi_11", "msi_12", "msi_13",
+			  "msi_14", "msi_15";
+
+	qcom,msi-gicm-addr = <0x0B00A040>;
+	qcom,msi-gicm-base = <0x1c0>;
+};
+
+&pcie0_rp {
+	status = "ok";
+
+	mhi_0: qcom,mhi@0 {
+		reg = <0 0 0 0 0 >;
+		qrtr_instance_id = <0x20>;
+#if !defined(__IPQ_MEM_PROFILE_256_MB__)
+		memory-region = <&mhi_region0>;
+#endif
+	};
+};
+
+&wifi0 {
+	// qcom,board_id = <0x13>;
+	status = "ok";
+};
+
+&sdhc_2 {
+	pinctrl-0 = <&sd_pins>;
+	pinctrl-names = "default";
+	cd-gpios = <&tlmm 62 1>;
+	sd-ldo-gpios = <&tlmm 66 0>;
+	vqmmc-supply = <&ipq6018_l2_corner>;
+	status = "ok";
+};
+
+&qpic_bam {
+	status = "ok";
+};
+
+&nand {
+	pinctrl-0 = <&qpic_pins>;
+	pinctrl-names = "default";
+	status = "ok";
+};
+
+&ssphy_0 {
+	status = "ok";
+};
+
+&qusb_phy_0 {
+	status = "ok";
+};
+
+&qusb_phy_1 {
+	status = "ok";
+};
+
+&usb2 {
+	status = "ok";
+};
+
+&usb3 {
+	pinctrl-0 = <&module_en>, <&module_power>;
+	pinctrl-names = "default";
+	status = "ok";
+};
+
+&nss_crypto {
+	status = "ok";
+};
+
+&pcie_phy {
+	status = "ok";
+};
+
+&pcie0 {
+// #if defined(__CNSS2__)
+	status = "ok";
+// #endif
+};
+
+&qpic_lcd {
+	status = "ok";
+};
+
+&qpic_lcd_panel {
+	status = "ok";
+};
+
+/* TZAPP is enabled in default memory profile only */
+#if !defined(__IPQ_MEM_PROFILE_256_MB__) && !defined(__IPQ_MEM_PROFILE_512_MB__)
+&qseecom {
+	mem-start = <0x49B00000>;
+	mem-size = <0x600000>;
+	status = "ok";
+};
+#endif

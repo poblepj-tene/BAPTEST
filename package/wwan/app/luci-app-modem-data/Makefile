@@ -1,0 +1,19 @@
+#
+# Copyright (C) 2023 OpenWrt.org
+#
+# This is free software, licensed under the GNU General Public License v2.
+# See /LICENSE for more information.
+#
+
+include $(TOPDIR)/rules.mk
+
+LUCI_TITLE:=Luci for Quectel Modem Data
+LUCI_DEPENDS:=+luci-compat +kmod-usb-net +kmod-usb-net-cdc-ether +kmod-usb-acm \
+		+kmod-usb-net-qmi-wwan +kmod-usb-net-rndis +kmod-usb-serial-qualcomm \
+		+kmod-usb-net-sierrawireless +kmod-usb-serial \
+		+kmod-usb-serial-option +kmod-usb-wdm \
+		+luci-proto-qmi +quectel-CM-5G +kmod-qmi_wwan_q
+
+include $(TOPDIR)/feeds/luci/luci.mk
+
+# call BuildPackage - OpenWrt buildroot signature

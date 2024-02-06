@@ -1,0 +1,11 @@
+#!/bin/sh
+
+uci -q batch <<-EOF >/dev/null
+	delete ucitrack.@modemdata[-1]
+	add ucitrack modemdata
+	set ucitrack.@modemdata[-1].init=modemdata
+	commit ucitrack
+EOF
+
+rm -f /tmp/luci-indexcache
+exit 0

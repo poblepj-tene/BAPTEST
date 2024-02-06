@@ -1,0 +1,581 @@
+--- a/drivers/usb/serial/option.c
++++ b/drivers/usb/serial/option.c
+@@ -670,6 +670,25 @@
+ };
+ 
+ static const struct usb_device_id option_ids[] = {
++	#if 1 //Added by Quectel
++	
++	{ USB_DEVICE(0x2C7C, 0x0125) }, /* Quectel EC20 R2.0/EC20 R2.1/EC25/EG25-G/EM05 */
++	{ USB_DEVICE(0x2C7C, 0x0121) }, /* Quectel EC21/EG21-G */
++	{ USB_DEVICE(0x2C7C, 0x0191) }, /* Quectel EG91 */
++	{ USB_DEVICE(0x2C7C, 0x0195) }, /* Quectel EG95 */
++	{ USB_DEVICE(0x2C7C, 0x0306) }, /* Quectel EG06/EP06/EM06 */
++	{ USB_DEVICE(0x2C7C, 0x0512) }, /* Quectel EG12/EM12/EG18 */
++	{ USB_DEVICE(0x2C7C, 0x0296) }, /* Quectel BG96 */
++	{ USB_DEVICE(0x2C7C, 0x0700) }, /* Quectel BG95/BG77/BG600L-M3/BC69 */
++	{ USB_DEVICE(0x2C7C, 0x0435) }, /* Quectel AG35 */
++	{ USB_DEVICE(0x2C7C, 0x0415) }, /* Quectel AG15 */
++	{ USB_DEVICE(0x2C7C, 0x0452) }, /* Quectel AG520R */
++	{ USB_DEVICE(0x2C7C, 0x0455) }, /* Quectel AG550R */
++	{ USB_DEVICE(0x2C7C, 0x0620) }, /* Quectel EG20 */
++	{ USB_DEVICE(0x2C7C, 0x0800) }, /* Quectel RG500Q/RM500Q/RG510Q/RM510Q */
++	{ USB_DEVICE(0x2C7C, 0x0900) }, /* Quectel RG500U*/
++	{ USB_DEVICE(0x2C7C, 0x0801) }, /* Quectel RM520*/
++	#endif
+ 	{ USB_DEVICE(OPTION_VENDOR_ID, OPTION_PRODUCT_COLT) },
+ 	{ USB_DEVICE(OPTION_VENDOR_ID, OPTION_PRODUCT_RICOLA) },
+ 	{ USB_DEVICE(OPTION_VENDOR_ID, OPTION_PRODUCT_RICOLA_LIGHT) },
+@@ -2057,6 +2076,9 @@
+ #ifdef CONFIG_PM
+ 	.suspend           = usb_wwan_suspend,
+ 	.resume            = usb_wwan_resume,
++#if 1 //Added by Quectel
++	.reset_resume      = usb_wwan_resume,
++#endif
+ #endif
+ };
+ 
+@@ -2095,7 +2117,19 @@
+ 	    dev_desc->idProduct == cpu_to_le16(SAMSUNG_PRODUCT_GT_B3730) &&
+ 	    iface_desc->bInterfaceClass != USB_CLASS_CDC_DATA)
+ 		return -ENODEV;
+-
++#if 1 //Added by Quectel
++//Quectel modules’s interface 4 can be used as USB network device
++	if (serial->dev->descriptor.idVendor == cpu_to_le16(0x2C7C)) {
++//some interfaces can be used as USB Network device (ecm, rndis, mbim)
++	if (serial->interface->cur_altsetting->desc.bInterfaceClass != 0xFF) {
++	return -ENODEV;
++}
++//interface 4 can be used as USB Network device (qmi)
++	else if (serial->interface->cur_altsetting->desc.bInterfaceNumber >= 4) {
++	return -ENODEV;
++	}
++}
++#endif
+ 	/* Store the blacklist info so we can use it during attach. */
+ 	usb_set_serial_data(serial, (void *)blacklist);
+ 
+--- a/drivers/usb/serial/usb_wwan.c
++++ b/drivers/usb/serial/usb_wwan.c
+@@ -504,6 +504,14 @@
+ 	usb_fill_bulk_urb(urb, serial->dev,
+ 			  usb_sndbulkpipe(serial->dev, endpoint) | dir,
+ 			  buf, len, callback, ctx);
++#if 1 //Added by Quectel for zero packet
++	if (dir == USB_DIR_OUT) {
++	struct usb_device_descriptor *desc = &serial->dev->descriptor;
++	
++	if (desc->idVendor == cpu_to_le16(0x2C7C))
++		urb->transfer_flags |= URB_ZERO_PACKET;
++}
++#endif
+ 
+ 	return urb;
+ }
+--- a/drivers/net/usb/qmi_wwan.c	
++++ b/drivers/net/usb/qmi_wwan.c
+@@ -14,7 +14,9 @@
+ #include <linux/netdevice.h>
+ #include <linux/ethtool.h>
+ #include <linux/etherdevice.h>
++#include <linux/if_arp.h>
+ #include <linux/mii.h>
++#include <linux/rtnetlink.h>
+ #include <linux/usb.h>
+ #include <linux/usb/cdc.h>
+ #include <linux/usb/usbnet.h>
+@@ -48,11 +50,108 @@
+ struct qmi_wwan_state {
+ 	struct usb_driver *subdriver;
+ 	atomic_t pmcount;
+-	unsigned long unused;
++	//unsigned long unused;
++	unsigned long flags;
+ 	struct usb_interface *control;
+ 	struct usb_interface *data;
+ };
+ 
++enum qmi_wwan_flags {
++	QMI_WWAN_FLAG_RAWIP = 1 << 0,
++	QMI_WWAN_FLAG_MUX = 1 << 1,
++};
++
++enum qmi_wwan_quirks {
++	QMI_WWAN_QUIRK_DTR = 1 << 0,	/* needs "set DTR" request */
++};
++
++static void qmi_wwan_netdev_setup(struct net_device *net)
++{
++	struct usbnet *dev = netdev_priv(net);
++	struct qmi_wwan_state *info = (void *)&dev->data;
++
++	if (info->flags & QMI_WWAN_FLAG_RAWIP) {
++		net->header_ops      = NULL;  /* No header */
++		net->type            = ARPHRD_NONE;
++		net->hard_header_len = 0;
++		net->addr_len        = 0;
++		net->flags           = IFF_POINTOPOINT | IFF_NOARP | IFF_MULTICAST;
++		netdev_dbg(net, "mode: raw IP\n");
++	} else if (!net->header_ops) { /* don't bother if already set */
++		ether_setup(net);
++		netdev_dbg(net, "mode: Ethernet\n");
++	}
++
++	/* recalculate buffers after changing hard_header_len */
++	usbnet_change_mtu(net, net->mtu);
++}
++
++static ssize_t raw_ip_show(struct device *d, struct device_attribute *attr, char *buf)
++{
++	struct usbnet *dev = netdev_priv(to_net_dev(d));
++	struct qmi_wwan_state *info = (void *)&dev->data;
++
++	return sprintf(buf, "%c\n", info->flags & QMI_WWAN_FLAG_RAWIP ? 'Y' : 'N');
++}
++
++static ssize_t raw_ip_store(struct device *d,  struct device_attribute *attr, const char *buf, size_t len)
++{
++	struct usbnet *dev = netdev_priv(to_net_dev(d));
++	struct qmi_wwan_state *info = (void *)&dev->data;
++	bool enable;
++	int ret;
++
++	if (strtobool(buf, &enable))
++		return -EINVAL;
++
++	/* no change? */
++	if (enable == (info->flags & QMI_WWAN_FLAG_RAWIP))
++		return len;
++
++	if (!rtnl_trylock())
++		return restart_syscall();
++
++	/* we don't want to modify a running netdev */
++	if (netif_running(dev->net)) {
++		netdev_err(dev->net, "Cannot change a running device\n");
++		ret = -EBUSY;
++		goto err;
++	}
++
++	/* let other drivers deny the change */
++	ret = call_netdevice_notifiers(NETDEV_PRE_TYPE_CHANGE, dev->net);
++	ret = notifier_to_errno(ret);
++	if (ret) {
++		netdev_err(dev->net, "Type change was refused\n");
++		goto err;
++	}
++
++	if (enable)
++		info->flags |= QMI_WWAN_FLAG_RAWIP;
++	else
++		info->flags &= ~QMI_WWAN_FLAG_RAWIP;
++	qmi_wwan_netdev_setup(dev->net);
++	call_netdevice_notifiers(NETDEV_POST_TYPE_CHANGE, dev->net);
++	ret = len;
++err:
++	rtnl_unlock();
++	return ret;
++}
++
++static DEVICE_ATTR(raw_ip, S_IRUGO | S_IWUSR, raw_ip_show, raw_ip_store);
++
++static struct attribute *qmi_wwan_sysfs_attrs[] = {
++	&dev_attr_raw_ip.attr,
++	NULL,
++};
++
++static struct attribute_group qmi_wwan_sysfs_attr_group = {
++	.name = "qmi",
++	.attrs = qmi_wwan_sysfs_attrs,
++};
++
++
++
+ /* default ethernet address used by the modem */
+ static const u8 default_modem_addr[ETH_ALEN] = {0x02, 0x50, 0xf3};
+ 
+@@ -80,6 +179,8 @@
+  */
+ static int qmi_wwan_rx_fixup(struct usbnet *dev, struct sk_buff *skb)
+ {
++	struct qmi_wwan_state *info = (void *)&dev->data;
++	bool rawip = info->flags & QMI_WWAN_FLAG_RAWIP;
+ 	__be16 proto;
+ 
+ 	/* This check is no longer done by usbnet */
+@@ -94,15 +195,26 @@
+ 		proto = htons(ETH_P_IPV6);
+ 		break;
+ 	case 0x00:
++		if (rawip)
++			return 0;
+ 		if (is_multicast_ether_addr(skb->data))
+ 			return 1;
+ 		/* possibly bogus destination - rewrite just in case */
+ 		skb_reset_mac_header(skb);
+ 		goto fix_dest;
+ 	default:
++		if (rawip)
++			return 0;
+ 		/* pass along other packets without modifications */
+ 		return 1;
+ 	}
++	
++	if (rawip) {
++		skb->dev = dev->net; /* normally set by eth_type_trans */
++		skb->protocol = proto;
++		return 1;
++	}
++		
+ 	if (skb_headroom(skb) < ETH_HLEN)
+ 		return 0;
+ 	skb_push(skb, ETH_HLEN);
+@@ -223,6 +335,20 @@
+ 	return rv;
+ }
+ 
++/* Send CDC SetControlLineState request, setting or clearing the DTR.
++ * "Required for Autoconnect and 9x30 to wake up" according to the
++ * GobiNet driver. The requirement has been verified on an MDM9230
++ * based Sierra Wireless MC7455
++ */
++static int qmi_wwan_change_dtr(struct usbnet *dev, bool on)
++{
++	u8 intf = dev->intf->cur_altsetting->desc.bInterfaceNumber;
++
++	return usbnet_write_cmd(dev, USB_CDC_REQ_SET_CONTROL_LINE_STATE,
++				USB_DIR_OUT | USB_TYPE_CLASS | USB_RECIP_INTERFACE,
++				on ? 0x01 : 0x00, intf, NULL, 0);
++}
++
+ static int qmi_wwan_bind(struct usbnet *dev, struct usb_interface *intf)
+ {
+ 	int status = -1;
+@@ -262,7 +388,7 @@
+ 	}
+ 
+ 	/* errors aren't fatal - we can live with the dynamic address */
+-	if (cdc_ether) {
++	if (cdc_ether && cdc_ether->wMaxSegmentSize) {
+ 		dev->hard_mtu = le16_to_cpu(cdc_ether->wMaxSegmentSize);
+ 		usbnet_get_ethernet_addr(dev, cdc_ether->iMACAddress);
+ 	}
+@@ -280,6 +406,29 @@
+ 		usb_driver_release_interface(driver, info->data);
+ 	}
+ 
++	/* disabling remote wakeup on MDM9x30 devices has the same
++	 * effect as clearing DTR. The device will not respond to QMI
++	 * requests until we set DTR again.  This is similar to a
++	 * QMI_CTL SYNC request, clearing a lot of firmware state
++	 * including the client ID allocations.
++	 *
++	 * Our usage model allows a session to span multiple
++	 * open/close events, so we must prevent the firmware from
++	 * clearing out state the clients might need.
++	 *
++	 * MDM9x30 is the first QMI chipset with USB3 support. Abuse
++	 * this fact to enable the quirk for all USB3 devices.
++	 *
++	 * There are also chipsets with the same "set DTR" requirement
++	 * but without USB3 support.  Devices based on these chips
++	 * need a quirk flag in the device ID table.
++	 */
++	if (dev->driver_info->data & QMI_WWAN_QUIRK_DTR ||
++	    le16_to_cpu(dev->udev->descriptor.bcdUSB) >= 0x0201) {
++		qmi_wwan_manage_power(dev, 1);
++		qmi_wwan_change_dtr(dev, true);
++	}
++
+ 	/* Never use the same address on both ends of the link, even if the
+ 	 * buggy firmware told us to. Or, if device is assigned the well-known
+ 	 * buggy firmware MAC address, replace it with a random address,
+@@ -294,6 +443,7 @@
+ 		dev->net->dev_addr[0] &= 0xbf;	/* clear "IP" bit */
+ 	}
+ 	dev->net->netdev_ops = &qmi_wwan_netdev_ops;
++	dev->net->sysfs_groups[0] = &qmi_wwan_sysfs_attr_group;
+ err:
+ 	return status;
+ }
+@@ -307,6 +457,12 @@
+ 	if (info->subdriver && info->subdriver->disconnect)
+ 		info->subdriver->disconnect(info->control);
+ 
++	/* disable MDM9x30 quirk */
++	if (le16_to_cpu(dev->udev->descriptor.bcdUSB) >= 0x0201) {
++		qmi_wwan_change_dtr(dev, false);
++		qmi_wwan_manage_power(dev, 0);
++	}
++
+ 	/* allow user to unbind using either control or data */
+ 	if (intf == info->control)
+ 		other = info->data;
+@@ -374,13 +530,23 @@
+ 
+ static const struct driver_info	qmi_wwan_info = {
+ 	.description	= "WWAN/QMI device",
+-	.flags		= FLAG_WWAN,
++	.flags		= FLAG_WWAN | FLAG_SEND_ZLP,
+ 	.bind		= qmi_wwan_bind,
+ 	.unbind		= qmi_wwan_unbind,
+ 	.manage_power	= qmi_wwan_manage_power,
+ 	.rx_fixup       = qmi_wwan_rx_fixup,
+ };
+ 
++static const struct driver_info	qmi_wwan_info_quirk_dtr = {
++	.description	= "WWAN/QMI device",
++	.flags		= FLAG_WWAN | FLAG_SEND_ZLP,
++	.bind		= qmi_wwan_bind,
++	.unbind		= qmi_wwan_unbind,
++	.manage_power	= qmi_wwan_manage_power,
++	.rx_fixup       = qmi_wwan_rx_fixup,
++	.data           = QMI_WWAN_QUIRK_DTR,
++};
++
+ #define HUAWEI_VENDOR_ID	0x12D1
+ 
+ /* map QMI/wwan function by a fixed interface number */
+@@ -388,6 +554,11 @@
+ 	USB_DEVICE_INTERFACE_NUMBER(vend, prod, num), \
+ 	.driver_info = (unsigned long)&qmi_wwan_info
+ 
++/* devices requiring "set DTR" quirk */
++#define QMI_QUIRK_SET_DTR(vend, prod, num) \
++	USB_DEVICE_INTERFACE_NUMBER(vend, prod, num), \
++	.driver_info = (unsigned long)&qmi_wwan_info_quirk_dtr
++
+ /* Gobi 1000 QMI/wwan interface number is 3 according to qcserial */
+ #define QMI_GOBI1K_DEVICE(vend, prod) \
+ 	QMI_FIXED_INTF(vend, prod, 3)
+@@ -396,6 +567,19 @@
+ #define QMI_GOBI_DEVICE(vend, prod) \
+ 	QMI_FIXED_INTF(vend, prod, 0)
+ 
++/* Many devices have QMI and DIAG functions which are distinguishable
++ * from other vendor specific functions by class, subclass and
++ * protocol all being 0xff. The DIAG function has exactly 2 endpoints
++ * and is silently rejected when probed.
++ *
++ * This makes it possible to match dynamically numbered QMI functions
++ * as seen on e.g. many Quectel modems.
++ */
++#define QMI_MATCH_FF_FF_FF(vend, prod) \
++	USB_DEVICE_AND_INTERFACE_INFO(vend, prod, USB_CLASS_VENDOR_SPEC, \
++				      USB_SUBCLASS_VENDOR_SPEC, 0xff), \
++	.driver_info = (unsigned long)&qmi_wwan_info_quirk_dtr
++
+ static const struct usb_device_id products[] = {
+ 	/* 1. CDC ECM like devices match on the control interface */
+ 	{	/* Huawei E392, E398 and possibly others sharing both device id and more... */
+@@ -410,6 +594,10 @@
+ 		USB_VENDOR_AND_INTERFACE_INFO(HUAWEI_VENDOR_ID, USB_CLASS_VENDOR_SPEC, 0x01, 0x69),
+ 		.driver_info        = (unsigned long)&qmi_wwan_info,
+ 	},
++	{	/* Motorola Mapphone devices with MDM6600 */
++		USB_VENDOR_AND_INTERFACE_INFO(0x22b8, USB_CLASS_VENDOR_SPEC, 0xfb, 0xff),
++		.driver_info        = (unsigned long)&qmi_wwan_info,
++	},
+ 
+ 	/* 2. Combined interface devices matching on class+protocol */
+ 	{	/* Huawei E367 and possibly others in "Windows mode" */
+@@ -496,8 +684,15 @@
+ 		USB_DEVICE_AND_INTERFACE_INFO(0x03f0, 0x581d, USB_CLASS_VENDOR_SPEC, 1, 7),
+ 		.driver_info = (unsigned long)&qmi_wwan_info,
+ 	},
+-
++	{QMI_MATCH_FF_FF_FF(0x2c7c, 0x0125)},	/* Quectel EC25, EC20 R2.0  Mini PCIe */
++	{QMI_MATCH_FF_FF_FF(0x2c7c, 0x0306)},	/* Quectel EP06/EG06/EM06 */
++	{QMI_MATCH_FF_FF_FF(0x2c7c, 0x0512)},	/* Quectel EG12/EM12 */
++	{QMI_MATCH_FF_FF_FF(0x2c7c, 0x0620)},	/* Quectel EM160R-GL */
++	{QMI_MATCH_FF_FF_FF(0x2c7c, 0x0800)},	/* Quectel RM500Q-GL */
++    {QMI_MATCH_FF_FF_FF(0x2c7c, 0x0900)},	/* Quectel RM500U-CN */
++        
+ 	/* 3. Combined interface devices matching on interface number */
++	{QMI_QUIRK_SET_DTR(0x05c6, 0x9091, 2)},	/* CEI SDX55 */
+ 	{QMI_FIXED_INTF(0x0408, 0xea42, 4)},	/* Yota / Megafon M100-1 */
+ 	{QMI_FIXED_INTF(0x05c6, 0x6001, 3)},	/* 4G LTE usb-modem U901 */
+ 	{QMI_FIXED_INTF(0x05c6, 0x7000, 0)},
+@@ -627,11 +822,15 @@
+ 	{QMI_FIXED_INTF(0x05c6, 0x9080, 8)},
+ 	{QMI_FIXED_INTF(0x05c6, 0x9083, 3)},
+ 	{QMI_FIXED_INTF(0x05c6, 0x9084, 4)},
++	{QMI_FIXED_INTF(0x05c6, 0x90b2, 3)},    /* ublox R410M */
+ 	{QMI_FIXED_INTF(0x05c6, 0x920d, 0)},
+ 	{QMI_FIXED_INTF(0x05c6, 0x920d, 5)},
+ 	{QMI_FIXED_INTF(0x0846, 0x68a2, 8)},
+ 	{QMI_FIXED_INTF(0x12d1, 0x140c, 1)},	/* Huawei E173 */
+ 	{QMI_FIXED_INTF(0x12d1, 0x14ac, 1)},	/* Huawei E1820 */
++	{QMI_FIXED_INTF(0x1435, 0xd181, 3)},	/* Wistron NeWeb D18Q1 */
++	{QMI_FIXED_INTF(0x1435, 0xd181, 4)},	/* Wistron NeWeb D18Q1 */
++	{QMI_FIXED_INTF(0x1435, 0xd181, 5)},	/* Wistron NeWeb D18Q1 */
+ 	{QMI_FIXED_INTF(0x16d8, 0x6003, 0)},	/* CMOTech 6003 */
+ 	{QMI_FIXED_INTF(0x16d8, 0x6007, 0)},	/* CMOTech CHE-628S */
+ 	{QMI_FIXED_INTF(0x16d8, 0x6008, 0)},	/* CMOTech CMU-301 */
+@@ -707,6 +906,8 @@
+ 	{QMI_FIXED_INTF(0x19d2, 0x1428, 2)},	/* Telewell TW-LTE 4G v2 */
+ 	{QMI_FIXED_INTF(0x19d2, 0x2002, 4)},	/* ZTE (Vodafone) K3765-Z */
+ 	{QMI_FIXED_INTF(0x2001, 0x7e19, 4)},	/* D-Link DWM-221 B1 */
++	{QMI_FIXED_INTF(0x2001, 0x7e35, 4)},	/* D-Link DWM-222 */
++	{QMI_FIXED_INTF(0x2020, 0x2033, 4)},	/* BroadMobi BM806U */
+ 	{QMI_FIXED_INTF(0x0f3d, 0x68a2, 8)},    /* Sierra Wireless MC7700 */
+ 	{QMI_FIXED_INTF(0x114f, 0x68a2, 8)},    /* Sierra Wireless MC7750 */
+ 	{QMI_FIXED_INTF(0x1199, 0x68a2, 8)},	/* Sierra Wireless MC7710 in QMI mode */
+@@ -730,6 +931,9 @@
+ 	{QMI_FIXED_INTF(0x1199, 0x9071, 10)},	/* Sierra Wireless MC74xx */
+ 	{QMI_FIXED_INTF(0x1199, 0x9079, 8)},	/* Sierra Wireless EM74xx */
+ 	{QMI_FIXED_INTF(0x1199, 0x9079, 10)},	/* Sierra Wireless EM74xx */
++	{QMI_FIXED_INTF(0x1199, 0x907b, 8)},	/* Sierra Wireless EM74xx */
++	{QMI_FIXED_INTF(0x1199, 0x907b, 10)},	/* Sierra Wireless EM74xx */
++	{QMI_FIXED_INTF(0x1199, 0x9091, 8)},	/* Sierra Wireless EM7565 */
+ 	{QMI_FIXED_INTF(0x1bbb, 0x011e, 4)},	/* Telekom Speedstick LTE II (Alcatel One Touch L100V LTE) */
+ 	{QMI_FIXED_INTF(0x1bbb, 0x0203, 2)},	/* Alcatel L800MA */
+ 	{QMI_FIXED_INTF(0x2357, 0x0201, 4)},	/* TP-LINK HSUPA Modem MA180 */
+@@ -753,7 +957,9 @@
+ 	{QMI_FIXED_INTF(0x413c, 0x81a9, 8)},	/* Dell Wireless 5808e Gobi(TM) 4G LTE Mobile Broadband Card */
+ 	{QMI_FIXED_INTF(0x413c, 0x81b1, 8)},	/* Dell Wireless 5809e Gobi(TM) 4G LTE Mobile Broadband Card */
+ 	{QMI_FIXED_INTF(0x03f0, 0x4e1d, 8)},	/* HP lt4111 LTE/EV-DO/HSPA+ Gobi 4G Module */
++	{QMI_FIXED_INTF(0x03f0, 0x9d1d, 1)},	/* HP lt4120 Snapdragon X5 LTE */
+ 	{QMI_FIXED_INTF(0x22de, 0x9061, 3)},	/* WeTelecom WPD-600N */
++	{QMI_FIXED_INTF(0x1e0e, 0x9001, 5)},	/* SIMCom 7230E */
+ 
+ 	/* 4. Gobi 1000 devices */
+ 	{QMI_GOBI1K_DEVICE(0x05c6, 0x9212)},	/* Acer Gobi Modem Device */
+@@ -845,6 +1051,18 @@
+ 		id->driver_info = (unsigned long)&qmi_wwan_info;
+ 	}
+ 
++	/* There are devices where the same interface number can be
++	 * configured as different functions. We should only bind to
++	 * vendor specific functions when matching on interface number
++	 */
++	if (id->match_flags & USB_DEVICE_ID_MATCH_INT_NUMBER &&
++	    desc->bInterfaceClass != USB_CLASS_VENDOR_SPEC) {
++		dev_dbg(&intf->dev,
++			"Rejecting interface number match for class %02x\n",
++			desc->bInterfaceClass);
++		return -ENODEV;
++	}
++
+ 	/* Quectel EC20 quirk where we've QMI on interface 4 instead of 0 */
+ 	if (quectel_ec20_detected(intf) && desc->bInterfaceNumber == 0) {
+ 		dev_dbg(&intf->dev, "Quectel EC20 quirk, skipping interface 0\n");
+--- a/drivers/net/usb/usbnet.c
++++ b/drivers/net/usb/usbnet.c
+@@ -323,7 +323,9 @@
+ 		return;
+ 	}
+ 
+-	skb->protocol = eth_type_trans (skb, dev->net);
++	//skb->protocol = eth_type_trans (skb, dev->net);
++	if (skb->protocol == 0) 
++   		skb->protocol = eth_type_trans (skb, dev->net);
+ 	dev->net->stats.rx_packets++;
+ 	dev->net->stats.rx_bytes += skb->len;
+ 	
+--- a/drivers/usb/serial/qcserial.c
++++ b/drivers/usb/serial/qcserial.c
+@@ -30,6 +30,7 @@
+ 	QCSERIAL_G1K = 1,	/* Gobi 1000 */
+ 	QCSERIAL_SWI = 2,	/* Sierra Wireless */
+ 	QCSERIAL_HWI = 3,	/* Huawei */
++	QCSERIAL_CEI = 4,	/* CEI */
+ };
+ 
+ #define DEVICE_G1K(v, p) \
+@@ -38,6 +39,10 @@
+ 	USB_DEVICE(v, p), .driver_info = QCSERIAL_SWI
+ #define DEVICE_HWI(v, p) \
+ 	USB_DEVICE(v, p), .driver_info = QCSERIAL_HWI
++#define DEVICE_CEI(v, p) \
++	USB_DEVICE(v, p), .driver_info = QCSERIAL_CEI
++
++	
+ 
+ static const struct usb_device_id id_table[] = {
+ 	/* Gobi 1000 devices */
+@@ -148,6 +153,7 @@
+ 	{DEVICE_SWI(0x1199, 0x68a2)},	/* Sierra Wireless MC7710 */
+ 	{DEVICE_SWI(0x1199, 0x68c0)},	/* Sierra Wireless MC7304/MC7354 */
+ 	{DEVICE_SWI(0x1199, 0x901c)},	/* Sierra Wireless EM7700 */
++	{DEVICE_SWI(0x1199, 0x901e)},	/* Sierra Wireless EM7355 QDL */
+ 	{DEVICE_SWI(0x1199, 0x901f)},	/* Sierra Wireless EM7355 */
+ 	{DEVICE_SWI(0x1199, 0x9040)},	/* Sierra Wireless Modem */
+ 	{DEVICE_SWI(0x1199, 0x9041)},	/* Sierra Wireless MC7305/MC7355 */
+@@ -158,10 +164,15 @@
+ 	{DEVICE_SWI(0x1199, 0x9056)},	/* Sierra Wireless Modem */
+ 	{DEVICE_SWI(0x1199, 0x9060)},	/* Sierra Wireless Modem */
+ 	{DEVICE_SWI(0x1199, 0x9061)},	/* Sierra Wireless Modem */
++	{DEVICE_SWI(0x1199, 0x9063)},	/* Sierra Wireless EM7305 */
+ 	{DEVICE_SWI(0x1199, 0x9070)},	/* Sierra Wireless MC74xx */
+ 	{DEVICE_SWI(0x1199, 0x9071)},	/* Sierra Wireless MC74xx */
+ 	{DEVICE_SWI(0x1199, 0x9078)},	/* Sierra Wireless EM74xx */
+ 	{DEVICE_SWI(0x1199, 0x9079)},	/* Sierra Wireless EM74xx */
++	{DEVICE_SWI(0x1199, 0x907a)},	/* Sierra Wireless EM74xx QDL */
++	{DEVICE_SWI(0x1199, 0x907b)},	/* Sierra Wireless EM74xx */
++	{DEVICE_SWI(0x1199, 0x9090)},	/* Sierra Wireless EM7565 QDL */
++	{DEVICE_SWI(0x1199, 0x9091)},	/* Sierra Wireless EM7565 */
+ 	{DEVICE_SWI(0x413c, 0x81a2)},	/* Dell Wireless 5806 Gobi(TM) 4G LTE Mobile Broadband Card */
+ 	{DEVICE_SWI(0x413c, 0x81a3)},	/* Dell Wireless 5570 HSPA+ (42Mbps) Mobile Broadband Card */
+ 	{DEVICE_SWI(0x413c, 0x81a4)},	/* Dell Wireless 5570e HSPA+ (42Mbps) Mobile Broadband Card */
+@@ -171,9 +182,15 @@
+ 	{DEVICE_SWI(0x413c, 0x81b3)},	/* Dell Wireless 5809e Gobi(TM) 4G LTE Mobile Broadband Card (rev3) */
+ 	{DEVICE_SWI(0x413c, 0x81b5)},	/* Dell Wireless 5811e QDL */
+ 	{DEVICE_SWI(0x413c, 0x81b6)},	/* Dell Wireless 5811e QDL */
++	{DEVICE_SWI(0x413c, 0x81cf)},   /* Dell Wireless 5819 */
++	{DEVICE_SWI(0x413c, 0x81d0)},   /* Dell Wireless 5819 */
++	{DEVICE_SWI(0x413c, 0x81d1)},   /* Dell Wireless 5818 */
++	{DEVICE_SWI(0x413c, 0x81d2)},   /* Dell Wireless 5818 */
+ 
+ 	/* Huawei devices */
+ 	{DEVICE_HWI(0x03f0, 0x581d)},	/* HP lt4112 LTE/HSPA+ Gobi 4G Modem (Huawei me906e) */
++	
++	{DEVICE_CEI(0x05c6, 0x9091)},	/* CEI SDX55 */
+ 
+ 	{ }				/* Terminating entry */
+ };
+@@ -338,6 +355,7 @@
+ 			break;
+ 		case 2:
+ 			dev_dbg(dev, "NMEA GPS interface found\n");
++			sendsetup = true;
+ 			break;
+ 		case 3:
+ 			dev_dbg(dev, "Modem port found\n");
+@@ -386,6 +404,30 @@
+ 				intf->desc.bInterfaceProtocol);
+ 		}
+ 		break;
++	case QCSERIAL_CEI:
++        /*
++         * CEI layout:
++         * 0: DIAG (use libqcdm from ModemManager for communication)
++         * 1: modem
++         * 2: QMI/net
++         * 3: ADB
++        */
++        switch (ifnum) {
++        case 0:
++            dev_err(dev, "DM/DIAG interface found\n");
++            break;
++        case 1:
++            dev_err(dev, "Modem port found\n");
++            sendsetup = true;
++            break;
++        default:
++            /* don't claim any unsupported interface */
++            dev_err(dev, "unsupported port found%d\n",ifnum);
++            altsetting = -1;
++            break;
++        }
++        break; 
++
+ 	default:
+ 		dev_err(dev, "unsupported device layout type: %lu\n",
+ 			id->driver_info); 	
+ 	
+ 	
+ 	
+

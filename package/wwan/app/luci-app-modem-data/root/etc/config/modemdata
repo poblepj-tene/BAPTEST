@@ -1,0 +1,3 @@
+config service
+	option enabled '0'
+	option ipv6 '0'
